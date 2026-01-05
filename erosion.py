@@ -44,7 +44,7 @@ else:
 
 
 # Define a kernel for erosion
-kernel = np.ones((10,10), np.uint8)
+kernel = np.ones((15,15), np.uint8)
 # Perform erosion
 eroded_image = cv.erode(image, kernel, iterations=1)
 
