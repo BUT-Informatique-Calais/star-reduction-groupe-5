@@ -73,7 +73,7 @@ else:
 moyenne, mediane, std = sigma_clipped_stats(image_float, sigma=3.0)
 
 daofind = DAOStarFinder(
-    fwhm_psf = FWHM_PSF,
+    fwhm = FWHM_PSF,
     threshold = THRESHOLD_SIGMA * std
 )
 
