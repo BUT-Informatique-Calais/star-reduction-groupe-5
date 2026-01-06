@@ -13,10 +13,17 @@ fits_file = './examples/HorseHead.fits'
 output_dir = './results'
 os.makedirs(output_dir, exist_ok=True)
 
-EROSION_KERNEL_SIZE = 15
-STAR_RADIUS = 6
-FWHM = 3.0
-THRESHOLD_SIGMA = 5.0
+# Taille du noyau pour l'érosion
+EROSION_KERNEL = 5
+
+# Calculer le rayon autour des étoiles
+ETOILES_RAYON = 6 
+
+# PSF taille moyenne des étoiles
+FWHM_PSF = 2.0  
+
+# Comme le nom de la fonction de DAOStarFinder
+THRESHOLD_SIGMA = 0.7  
 
 hdul = fits.open(fits_file)
 
@@ -63,42 +70,38 @@ else:
     image_float = data.astype(np.float64)
 
 
-mean, median, std = sigma_clipped_stats(image_float, sigma=3.0)
+moyenne, mediane, std = sigma_clipped_stats(image_float, sigma=3.0)
 
 daofind = DAOStarFinder(
-    fwhm=FWHM,
-    threshold=THRESHOLD_SIGMA * std
+    fwhm_psf = FWHM_PSF,
+    threshold = THRESHOLD_SIGMA * std
 )
 
-sources = daofind(image_float - median)
+sources = daofind(image_float - mediane)
 
 
-mask = np.zeros(image.shape[:2], dtype=np.uint8)
+masque = np.zeros(image.shape[:2], dtype=np.uint8)
 
 if sources is not None:
     for star in sources:
         x = int(star['xcentroid'])
         y = int(star['ycentroid'])
 
-        cv.circle(
-            mask,
-            (x, y),
-            STAR_RADIUS,
-            255,
-            -1
-        )
+        cv.circle(masque, (x, y), ETOILES_RAYON, 255, -1)
 
-cv.imwrite('./results/masque_binaire.png', mask)
+# Save the masque binaire
+cv.imwrite('./results/masque_binaire.png', masque)
 
 
-mask_blur = cv.GaussianBlur(mask, (21, 21), 0)
-mask_float = mask_blur / 255.0
+masque_adouci = cv.GaussianBlur(masque, (21, 21), 0)
+masque_float = masque_adouci / 255.0
 
-cv.imwrite(f'{output_dir}/masque_adouci.png', mask_blur)
+# Save the mask adouci 
+cv.imwrite('./results/masque_adouci.png', masque_adouci)
 
 
 # Define a kernel for erosion
-kernel = np.ones((EROSION_KERNEL_SIZE, EROSION_KERNEL_SIZE), np.uint8)
+kernel = np.ones((EROSION_KERNEL, EROSION_KERNEL), np.uint8)
 
 # Perform erosion
 eroded_image = cv.erode(image, kernel, iterations=1)
@@ -110,12 +113,11 @@ cv.imwrite('./results/eroded.png', eroded_image)
 image_f = image.astype(np.float32)
 eroded_f = eroded_image.astype(np.float32)
 
-final = (mask_float[..., None] * eroded_f +
-         (1 - mask_float[..., None]) * image_f) if image.ndim == 3 else \
-        (mask_float * eroded_f + (1 - mask_float) * image_f)
+final = (masque_float[..., None] * eroded_f +(1 - masque_float[..., None]) * image_f) if image.ndim == 3 else  (masque_float * eroded_f + (1 - masque_float) * image_f)
 
 final = np.clip(final, 0, 255).astype(np.uint8)
 
+# Save the final image
 cv.imwrite('./results/image_finale.png', final)
 
 
