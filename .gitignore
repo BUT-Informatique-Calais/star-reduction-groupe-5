@@ -1,2 +1,5 @@
 venv/
 results/eroded.png
+results/masque_binaire.png
+results/masque_adouci.png
+results/image_finale.png
