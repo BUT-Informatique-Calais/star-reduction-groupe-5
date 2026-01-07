@@ -127,7 +127,7 @@ if sources is not None:
 
 
 for k, m in masque.items():
-    cv.imwrite(f'./results/masque_kernel_{k}.png', m)
+    cv.imwrite(f'./results/masque_noyau_{k}.png', m)
 
 
 # Define a kernel for erosion
