@@ -87,7 +87,8 @@ if sources is not None:
         x = int(star['xcentroid'])
         y = int(star['ycentroid'])
 
-        cv.circle(masque, (x, y), ETOILES_RAYON, 255, -1)
+        cv.rectangle(masque, (x - ETOILES_RAYON, y - ETOILES_RAYON), (x + ETOILES_RAYON, y + ETOILES_RAYON), 255,-1)
+
 
 # Save the masque binaire
 cv.imwrite('./results/masque_binaire.png', masque)
