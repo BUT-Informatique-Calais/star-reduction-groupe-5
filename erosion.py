@@ -25,6 +25,17 @@ FWHM_PSF = 2.0
 # Comme le nom de la fonction de DAOStarFinder
 THRESHOLD_SIGMA = 0.7  
 
+
+def kernel_magnitude(mag):
+    """     
+    Plus l'étoile est brillante (mag faible),
+    plus le noyau d'érosion est grand
+    """
+    if mag < -5:
+        return 15
+    else:
+        return 3
+
 hdul = fits.open(fits_file)
 
 # Display information about the file
@@ -86,29 +97,37 @@ daofind = DAOStarFinder(
 # sources contient les positions et caractéristiques des étoiles détectées
 sources = daofind(image_float - mediane)
 
-# Création d’un masque binaire vide (noir) de la taille de l’image
-masque = np.zeros(image.shape[:2], dtype=np.uint8)
+if sources is None:
+    print("Nombre d'étoiles détectées : 0")
+else:
+    print(f"Nombre d'étoiles détectées : {len(sources)}")
 
+
+# Masques par taille de noyau
+kernel_sizes = [3, 15]
+
+masque = {
+    k: np.zeros(image.shape[:2], dtype=np.uint8)
+    for k in kernel_sizes
+}
 # Vérification qu’au moins une étoile a été détectée
 if sources is not None:
     for star in sources:
         # Coordonnées du centre de l’étoile détectée
         x = int(star['xcentroid'])
         y = int(star['ycentroid'])
+        mag = star["mag"]
+
+        k = kernel_magnitude(mag)
+        if k not in masque:
+            continue
 
         # Dessin d’un carré blanc centré sur chaque étoile
-        cv.rectangle(masque, (x - ETOILES_RAYON, y - ETOILES_RAYON), (x + ETOILES_RAYON, y + ETOILES_RAYON), 255,-1)
+        cv.rectangle(masque[k], (x - ETOILES_RAYON, y - ETOILES_RAYON), (x + ETOILES_RAYON, y + ETOILES_RAYON), 255,-1)
 
 
-# Enregistrer le masque binaire
-cv.imwrite('./results/masque_binaire.png', masque)
-
-
-masque_adouci = cv.GaussianBlur(masque, (21, 21), 0)
-masque_float = masque_adouci / 255.0
-
-# Enregistrer le masque adouci 
-cv.imwrite('./results/masque_adouci.png', masque_adouci)
+for k, m in masque.items():
+    cv.imwrite(f'./results/masque_kernel_{k}.png', m)
 
 
 # Define a kernel for erosion
@@ -121,15 +140,21 @@ eroded_image = cv.erode(image, kernel, iterations=1)
 cv.imwrite('./results/eroded.png', eroded_image)
 
 
-image_f = image.astype(np.float32)
-eroded_f = eroded_image.astype(np.float32)
+image_finale = image.astype(np.float32)
 
-final = (masque_float[..., None] * eroded_f +(1 - masque_float[..., None]) * image_f) if image.ndim == 3 else  (masque_float * eroded_f + (1 - masque_float) * image_f)
+for kernel_size, masque in masque.items():
+    if np.count_nonzero(masque) == 0:
+        continue
 
-final = np.clip(final, 0, 255).astype(np.uint8)
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    image_eroded = cv.erode(image, kernel, iterations=1).astype(np.float32)
 
-# Enregistrer l'image finale
-cv.imwrite('./results/image_finale.png', final)
+    masque_flou = cv.GaussianBlur(masque, (21, 21), 0) / 255.0
 
+    if image.ndim == 3:
+        masque_flou = masque_flou[..., None]
 
-hdul.close()
+    image_finale = (masque_flou * image_eroded +(1 - masque_flou) * image_finale)
+
+image_finale = np.clip(image_finale, 0, 255).astype(np.uint8)
+cv.imwrite(f'./results/image_finale.png', image_finale)
