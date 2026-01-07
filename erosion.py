@@ -70,34 +70,44 @@ else:
     image_float = data.astype(np.float64)
 
 
+# Calcul des statistiques de fond de ciel
+# moyenne : moyenne du fond
+# mediane : valeur du fond de ciel
+# std : écart-type du bruit
 moyenne, mediane, std = sigma_clipped_stats(image_float, sigma=3.0)
 
+# Initialisation de l’algorithme de détection d’étoiles
 daofind = DAOStarFinder(
     fwhm = FWHM_PSF,
     threshold = THRESHOLD_SIGMA * std
 )
 
+# Détection des étoiles sur l’image après soustraction du fond (médiane)
+# sources contient les positions et caractéristiques des étoiles détectées
 sources = daofind(image_float - mediane)
 
-
+# Création d’un masque binaire vide (noir) de la taille de l’image
 masque = np.zeros(image.shape[:2], dtype=np.uint8)
 
+# Vérification qu’au moins une étoile a été détectée
 if sources is not None:
     for star in sources:
+        # Coordonnées du centre de l’étoile détectée
         x = int(star['xcentroid'])
         y = int(star['ycentroid'])
 
+        # Dessin d’un carré blanc centré sur chaque étoile
         cv.rectangle(masque, (x - ETOILES_RAYON, y - ETOILES_RAYON), (x + ETOILES_RAYON, y + ETOILES_RAYON), 255,-1)
 
 
-# Save the masque binaire
+# Enregistrer le masque binaire
 cv.imwrite('./results/masque_binaire.png', masque)
 
 
 masque_adouci = cv.GaussianBlur(masque, (21, 21), 0)
 masque_float = masque_adouci / 255.0
 
-# Save the mask adouci 
+# Enregistrer le masque adouci 
 cv.imwrite('./results/masque_adouci.png', masque_adouci)
 
 
@@ -118,7 +128,7 @@ final = (masque_float[..., None] * eroded_f +(1 - masque_float[..., None]) * ima
 
 final = np.clip(final, 0, 255).astype(np.uint8)
 
-# Save the final image
+# Enregistrer l'image finale
 cv.imwrite('./results/image_finale.png', final)
 
 
