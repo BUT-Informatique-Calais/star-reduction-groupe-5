@@ -3,3 +3,4 @@ matplotlib==3.10.8
 numpy==2.2.0
 opencv-python==4.12.0.88
 photutils==2.3.0
+PySide6==6.8.0
