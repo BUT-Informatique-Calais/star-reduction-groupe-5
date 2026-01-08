@@ -140,21 +140,35 @@ eroded_image = cv.erode(image, kernel, iterations=1)
 cv.imwrite('./results/eroded.png', eroded_image)
 
 
+# Conversion de l'image originale en float pour éviter les pertes de précision lors des calculs
 image_finale = image.astype(np.float32)
 
+# Parcours de chaque masque associé à une taille de noyau d’érosion
+# kernel_size : taille du noyau
+# masque : masque binaire correspondant aux étoiles de cette taille
 for kernel_size, masque in masque.items():
+    
+    # Si le masque est vide, on passe à la taille suivante
     if np.count_nonzero(masque) == 0:
         continue
 
+    # Création du noyau d’érosion carré de taille kernel_size
     kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    
+    # Application de l’érosion sur toute l’image
     image_eroded = cv.erode(image, kernel, iterations=1).astype(np.float32)
 
+    # Floutage du masque pour adoucir les transitions et éviter les artefacts visuels
     masque_flou = cv.GaussianBlur(masque, (21, 21), 0) / 255.0
 
+    # Si l’image est en couleur, on adapte le masque
     if image.ndim == 3:
         masque_flou = masque_flou[..., None]
 
+    # Fusion entre l’image érodée et l’image courante
     image_finale = (masque_flou * image_eroded +(1 - masque_flou) * image_finale)
 
+
 image_finale = np.clip(image_finale, 0, 255).astype(np.uint8)
+# Sauvegarde de l’image finale traitée
 cv.imwrite(f'./results/image_finale.png', image_finale)
