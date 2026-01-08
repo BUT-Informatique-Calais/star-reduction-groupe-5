@@ -24,6 +24,8 @@ class InterfaceChoix(QWidget):
         super().__init__()
         self.setWindowTitle("Choisir une image FITS")
         self.resize(800, 600)
+        self.bouton_ouvrir.setMinimumSize(900, 600)
+        self.bouton_ouvrir.setStyleSheet("background-color: gray; color: white;")
 
         self.bouton_ouvrir = QPushButton("Ouvrir FITS")
         self.bouton_ouvrir.clicked.connect(self.ouvrir_fits)
@@ -78,11 +80,12 @@ class InterfacePersonnalisation(QWidget):
 
         self.bouton_enregistrer = QPushButton("Enregistrer et Comparer")
         self.bouton_enregistrer.clicked.connect(self.enregistrer_et_comparer)
+        self.bouton_enregistrer.setStyleSheet("background-color: gray; color: black;")
 
         layout = QVBoxLayout()
-        layout.addWidget(QLabel("Taille du noyau d’érosion (étoiles faibles)"))
+        layout.addWidget(QLabel("Taille du noyau d’érosion :"))
         layout.addWidget(self.kernel_slider)
-        layout.addWidget(QLabel("Seuil de détection des étoiles"))
+        layout.addWidget(QLabel("Seuil de détection des étoiles :"))
         layout.addWidget(self.threshold_slider)
         layout.addWidget(self.label_image)
         layout.addWidget(self.bouton_enregistrer)
