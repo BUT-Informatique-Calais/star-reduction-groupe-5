@@ -94,11 +94,16 @@ class InterfacePersonnalisation(QWidget):
         return 15 if mag < -5 else self.kernel_slider.value() | 1 
 
     def mettre_a_jour_image(self):
-        threshold_sigma = self.threshold_slider.value() / 10.0
-        mean, median, std = sigma_clipped_stats(self.image_float, sigma=3.0)
+        THRESHOLD_SIGMA = self.threshold_slider.value() / 10.0
 
-        daofind = DAOStarFinder(fwhm=self.FWHM_PSF, threshold=threshold_sigma * std)
-        sources = daofind(self.image_float - median)
+        # Calcul des statistiques de fond de ciel
+        # moyenne : moyenne du fond
+        # mediane : valeur du fond de ciel
+        # std : écart-type du bruit
+        moyenne, mediane, std = sigma_clipped_stats(self.image_float, sigma=3.0)
+
+        daofind = DAOStarFinder(fwhm=self.FWHM_PSF, threshold=THRESHOLD_SIGMA * std)
+        sources = daofind(self.image_float - mediane)
 
         # Image finale
         image_finale = self.image_originale.astype(np.float32)
