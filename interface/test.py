@@ -12,84 +12,73 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtCore import Qt, QTimer
 
-# 3 lignes qui permettent de ne pas être spam de warning dans la console
+# 3 lignes qui permettent de ne pas afficher les warnings dans la console.
 import warnings
 from photutils.utils import NoDetectionsWarning
-
 warnings.filterwarnings("ignore", category=NoDetectionsWarning)
 
 
-
-# Interface 1 : Choix du FITS
-
+# Interface 1 : Mettre l'image fits que l'on veut dans le logiciel
 class InterfaceChoix(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Choisir une image FITS")
         self.resize(800, 600)
 
-        # Bouton pour choisir le fichier FITS
         self.bouton_ouvrir = QPushButton("Ouvrir FITS")
         self.bouton_ouvrir.clicked.connect(self.ouvrir_fits)
 
-        # Layout simple
         layout = QVBoxLayout()
         layout.addWidget(self.bouton_ouvrir)
         self.setLayout(layout)
 
-    # Permet d'ouvrir un FITS
     def ouvrir_fits(self):
         path, _ = QFileDialog.getOpenFileName(self, "Ouvrir un FITS", "", "*.fits")
         if not path:
             return
 
-        # Lecture de l'image FITS en niveaux de gris pour simplifier
+        # Lecture de l'image chosie
         data = fits.getdata(path)
-        image = ((data - data.min()) / (data.max() - data.min()) * 255).astype(np.uint8)
+        image = ((data - np.min(data)) / (np.max(data) - np.min(data)) * 255).astype(np.uint8)
 
-        # Ouvre l'interface de personnalisation et cache celle-ci
+        # Ouvre l'interface de personnalisation
         self.interface_param = InterfacePersonnalisation(image)
         self.interface_param.showMaximized()
         self.hide()
 
 
-
-# Interface 2 : Personnalisation / Star Reduction
+# Interface 2 : Personnalisation de l'interface
 class InterfacePersonnalisation(QWidget):
     def __init__(self, image):
         super().__init__()
         self.setWindowTitle("Personnaliser l'image")
         self.resize(1000, 700)
 
-        # Image originale
         self.image_originale = image.copy()
         self.image_float = image.astype(np.float64)
         self.image_traitée = image.copy()
 
-        # Constantes (comme dans ton script)
         self.FWHM_PSF = 2.0
         self.ETOILES_RAYON = 6
 
+        # Widgets
         self.label_image = QLabel("Image FITS chargée")
         self.label_image.setAlignment(Qt.AlignCenter)
         self.label_image.setMinimumSize(800, 500)
 
         self.kernel_slider = QSlider(Qt.Horizontal)
-        self.kernel_slider.setMinimum(3)
-        self.kernel_slider.setMaximum(15)
+        self.kernel_slider.setRange(3, 15)
         self.kernel_slider.setValue(5)
         self.kernel_slider.valueChanged.connect(self.mettre_a_jour_image)
 
         self.threshold_slider = QSlider(Qt.Horizontal)
-        self.threshold_slider.setMinimum(1)
-        self.threshold_slider.setMaximum(20)
+        self.threshold_slider.setRange(1, 20)
         self.threshold_slider.setValue(7)
         self.threshold_slider.valueChanged.connect(self.mettre_a_jour_image)
 
         self.bouton_enregistrer = QPushButton("Enregistrer et Comparer")
         self.bouton_enregistrer.clicked.connect(self.enregistrer_et_comparer)
 
-        # Mise en place de l'interface
         layout = QVBoxLayout()
         layout.addWidget(QLabel("Taille du noyau d’érosion (étoiles faibles)"))
         layout.addWidget(self.kernel_slider)
@@ -99,73 +88,41 @@ class InterfacePersonnalisation(QWidget):
         layout.addWidget(self.bouton_enregistrer)
         self.setLayout(layout)
 
-        # Affichage initial
         self.afficher_image(self.image_traitée)
 
-    # Calcule la taille du noyau selon la magnitude
-    def noyau_selon_magnitude(self, mag):
-        if mag < -5:
-            return 15
-        else:
-            return self.kernel_slider.value()
+    def noyau_magnitude(self, mag):
+        return 15 if mag < -5 else self.kernel_slider.value() | 1 
 
-    # Met à jour l'image
     def mettre_a_jour_image(self):
         threshold_sigma = self.threshold_slider.value() / 10.0
+        mean, median, std = sigma_clipped_stats(self.image_float, sigma=3.0)
 
-        # Statistiques du fond de ciel
-        moyenne, mediane, std = sigma_clipped_stats(self.image_float, sigma=3.0)
+        daofind = DAOStarFinder(fwhm=self.FWHM_PSF, threshold=threshold_sigma * std)
+        sources = daofind(self.image_float - median)
 
-        # Détection des étoiles
-        daofind = DAOStarFinder(
-            fwhm=self.FWHM_PSF,
-            threshold=threshold_sigma * std
-        )
-
-        sources = daofind(self.image_float - mediane)
-
-        # Image finale (float pour mélange progressif)
+        # Image finale
         image_finale = self.image_originale.astype(np.float32)
 
         if sources is not None:
+            # Masque global
+            masque_total = np.zeros_like(self.image_originale, dtype=np.float32)
             for star in sources:
                 x = int(star["xcentroid"])
                 y = int(star["ycentroid"])
-                mag = star["mag"]
+                kernel_size = self.noyau_magnitude(star["mag"])
+                cv.rectangle(masque_total,
+                             (x - self.ETOILES_RAYON, y - self.ETOILES_RAYON),
+                             (x + self.ETOILES_RAYON, y + self.ETOILES_RAYON),
+                             1.0, -1)
+            # Flou et érosion
+            masque_flou = cv.GaussianBlur(masque_total, (21, 21), 0)
+            kernel = np.ones((kernel_size, kernel_size), np.uint8)
+            image_eroded = cv.erode(self.image_originale, kernel, iterations=1)
+            image_finale = masque_flou * image_eroded + (1 - masque_flou) * image_finale
 
-                # Taille du noyau selon la magnitude
-                kernel_size = self.noyau_selon_magnitude(mag)
-                if kernel_size % 2 == 0:
-                    kernel_size += 1
-
-                # Création du masque
-                masque = np.zeros(self.image_originale.shape, dtype=np.uint8)
-                cv.rectangle(
-                    masque,
-                    (x - self.ETOILES_RAYON, y - self.ETOILES_RAYON),
-                    (x + self.ETOILES_RAYON, y + self.ETOILES_RAYON),
-                    255,
-                    -1
-                )
-
-                # Flou du masque
-                masque_flou = cv.GaussianBlur(masque, (21, 21), 0) / 255.0
-
-                # Érosion locale
-                kernel = np.ones((kernel_size, kernel_size), np.uint8)
-                image_eroded = cv.erode(self.image_originale, kernel, iterations=1)
-
-                # Fusion
-                image_finale = (
-                    masque_flou * image_eroded +
-                    (1 - masque_flou) * image_finale
-                )
-
-        # Conversion finale
         self.image_traitée = np.clip(image_finale, 0, 255).astype(np.uint8)
         self.afficher_image(self.image_traitée)
 
-    # Affiche l'image dans le label
     def afficher_image(self, image):
         h, w = image.shape
         qimg = QImage(image.data, w, h, w, QImage.Format_Grayscale8)
@@ -176,18 +133,13 @@ class InterfacePersonnalisation(QWidget):
         )
         self.label_image.setPixmap(pixmap)
 
-    # Enregistre et ouvre le comparateur
     def enregistrer_et_comparer(self):
-        self.interface_comp = ComparateurApplication(
-            self.image_originale,
-            self.image_traitée
-        )
+        self.interface_comp = ComparateurApplication(self.image_originale, self.image_traitée)
         self.interface_comp.showMaximized()
         self.close()
 
 
-# Interface 3 : Comparateur (Avant / Après)
-
+# Interface 3 : Comparateur Avant / Après de la photo
 class ComparateurApplication(QWidget):
     def __init__(self, image_originale, image_finale):
         super().__init__()
@@ -198,32 +150,26 @@ class ComparateurApplication(QWidget):
         self.image_finale = image_finale
         self.hauteur, self.largeur = self.image_originale.shape
 
-        # Timer qui permet de jongler entre les deux images
         self.timer_clignotement = QTimer()
         self.timer_clignotement.timeout.connect(self.clignotement)
         self.affiche_originale = True
 
-        # ---- Widgets ----
         self.label_image = QLabel()
         self.label_image.setAlignment(Qt.AlignCenter)
         self.label_image.setMinimumSize(1000, 600)
 
-        # Bouton pour démarrer le clignotement
         self.bouton_start = QPushButton("Démarrer clignotement")
         self.bouton_start.clicked.connect(self.demarrer_clignotement)
         self.bouton_start.setStyleSheet("background-color: green; color: white;")
         self.bouton_start.setFixedSize(380, 50)
 
-        # Bouton pour arrêter le clignotement
         self.bouton_stop = QPushButton("Arrêter clignotement")
         self.bouton_stop.clicked.connect(self.arreter_clignotement)
         self.bouton_stop.setStyleSheet("background-color: red; color: white;")
         self.bouton_stop.setFixedSize(380, 50)
 
-        # Slider pour comparaison interactive
         self.slider_comparaison = QSlider(Qt.Horizontal)
-        self.slider_comparaison.setMinimum(0)
-        self.slider_comparaison.setMaximum(self.largeur)
+        self.slider_comparaison.setRange(0, self.largeur)
         self.slider_comparaison.setValue(self.largeur // 2)
         self.slider_comparaison.valueChanged.connect(self.comparaison_curseur)
 
@@ -237,12 +183,10 @@ class ComparateurApplication(QWidget):
         layout_slider.addWidget(self.slider_comparaison)
         layout_slider.addWidget(self.label_apres)
 
-        # Regroupe les boutons de clignotement
         layout_boutons = QHBoxLayout()
         layout_boutons.addWidget(self.bouton_start)
         layout_boutons.addWidget(self.bouton_stop)
 
-        # Assemblage de toute l'interface
         layout = QVBoxLayout()
         layout.addWidget(self.label_image)
         layout.addWidget(QLabel("Comparaison : Déplacez le curseur ci-dessous pour voir les changements."))
@@ -252,32 +196,23 @@ class ComparateurApplication(QWidget):
 
         self.afficher(self.image_finale)
 
-    # Démarrer le clignotement
     def demarrer_clignotement(self):
         if not self.timer_clignotement.isActive():
             self.timer_clignotement.start(500)
 
-    # Arrêter le clignotement
     def arreter_clignotement(self):
         self.timer_clignotement.stop()
         self.afficher(self.image_finale)
 
-    # Permet de jongler entre les deux images
     def clignotement(self):
-        if self.affiche_originale:
-            self.afficher(self.image_originale)
-        else:
-            self.afficher(self.image_finale)
+        self.afficher(self.image_originale if self.affiche_originale else self.image_finale)
         self.affiche_originale = not self.affiche_originale
 
-    # Comparaison interactive via slider
     def comparaison_curseur(self, position):
-        image_mixte = np.zeros_like(self.image_originale)
-        image_mixte[:, :position] = self.image_originale[:, :position]
+        image_mixte = self.image_originale.copy()
         image_mixte[:, position:] = self.image_finale[:, position:]
         self.afficher(image_mixte)
 
-    # Affichage de l'image dans le label
     def afficher(self, image):
         h, w = image.shape
         qimg = QImage(image.data, w, h, w, QImage.Format_Grayscale8)
@@ -289,9 +224,7 @@ class ComparateurApplication(QWidget):
         self.label_image.setPixmap(pixmap)
 
 
-
 # Lancement de l'application
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     fenetre = InterfaceChoix()
