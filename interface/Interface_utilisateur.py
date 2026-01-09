@@ -17,22 +17,31 @@ import warnings
 from photutils.utils import NoDetectionsWarning
 warnings.filterwarnings("ignore", category=NoDetectionsWarning)
 
-
 # Interface 1 : Mettre l'image fits que l'on veut dans le logiciel
 class InterfaceChoix(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Choisir une image FITS")
         self.resize(800, 600)
+        self.label_bienvenue = QLabel("Bienvenue,\npour commencer veuillez sélectionner votre image.")
+        self.label_bienvenue.setAlignment(Qt.AlignCenter)
+        self.label_bienvenue.setStyleSheet("font-size: 20px; font-weight: bold; color: black;")
+        panneau_bienvenue = QWidget()
+        panneau_bienvenue.setStyleSheet("background-color: gray; border-radius: 10px; margin-left: 50px; margin-right: 50px;")
+
+        layout_panneau = QVBoxLayout()
+        layout_panneau.addWidget(self.label_bienvenue)
+        panneau_bienvenue.setLayout(layout_panneau)
 
         self.bouton_ouvrir = QPushButton("Ouvrir FITS")
         self.bouton_ouvrir.clicked.connect(self.ouvrir_fits)
         self.bouton_ouvrir.setMinimumSize(200, 50)
         self.bouton_ouvrir.setStyleSheet("background-color: gray; color: white; font-size: 18px;")
 
-        # Layout
         layout = QVBoxLayout()
         layout.addStretch()
+        layout.addWidget(panneau_bienvenue)
+        layout.addSpacing(30)
         layout.addWidget(self.bouton_ouvrir, alignment=Qt.AlignCenter)
         layout.addStretch()
         self.setLayout(layout)
@@ -42,7 +51,7 @@ class InterfaceChoix(QWidget):
         if not path:
             return
 
-        # Lecture de l'image chosie avec son path
+        # Lecture de l'image choisie
         data = fits.getdata(path)
         if data.ndim > 2:
             data = np.mean(data, axis=0)
@@ -366,9 +375,22 @@ class ComparateurApplication(QWidget):
     def comparaison_curseur(self, position):
         image_mixte = self.image_originale.copy()
         image_mixte[:, position:] = self.image_finale[:, position:]
+        
+        image_mixte = cv.cvtColor(image_mixte, cv.COLOR_GRAY2BGR)
+        cv.line(
+            image_mixte,
+            (position, 0),
+            (position, self.hauteur),
+            (0, 0, 255),
+            2
+        )
+
         self.afficher(image_mixte)
 
     def afficher(self, image):
+        if len(image.shape) == 3:
+                image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+
         h, w = image.shape
         qimg = QImage(image.data, w, h, w, QImage.Format_Grayscale8)
         pixmap = QPixmap.fromImage(qimg).scaled(
