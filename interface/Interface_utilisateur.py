@@ -30,6 +30,7 @@ class InterfaceChoix(QWidget):
         self.bouton_ouvrir.setMinimumSize(200, 50)
         self.bouton_ouvrir.setStyleSheet("background-color: gray; color: white; font-size: 18px;")
 
+        # Layout
         layout = QVBoxLayout()
         layout.addStretch()
         layout.addWidget(self.bouton_ouvrir, alignment=Qt.AlignCenter)
@@ -41,12 +42,13 @@ class InterfaceChoix(QWidget):
         if not path:
             return
 
-        # Lecture de l'image chosie
+        # Lecture de l'image chosie avec son path
         data = fits.getdata(path)
         if data.ndim > 2:
             data = np.mean(data, axis=0)
 
         data = np.nan_to_num(data)
+        #Pour convertir l'image en formats 8 bits au lieu de le laisser par défaut
         image = ((data - np.min(data)) / (np.max(data) - np.min(data)) * 255).astype(np.uint8)
 
         # Ouvre l'interface de personnalisation
@@ -66,8 +68,13 @@ class InterfacePersonnalisation(QWidget):
         self.image_float = image.astype(np.float64)
         self.image_traitée = image.copy()
 
+        # PSF taille moyenne des étoiles (comme dans erosion.py)
         self.FWHM_PSF = 2.0
+
+        # Calculer le rayon autour des étoiles (comme dans erosion.py)
         self.ETOILES_RAYON = 6
+        
+        self.multitaille_active = False
 
         # Widgets
         self.label_image = QLabel("Image FITS chargée")
@@ -93,6 +100,13 @@ class InterfacePersonnalisation(QWidget):
         self.bouton_retour.setFixedSize(120, 50)
         self.bouton_retour.setStyleSheet("background-color: orange; color: white; font-size: 16px;")
         self.bouton_retour.clicked.connect(self.retour_interface_choix)
+        
+        self.bouton_multitaille = QPushButton("Réduction multitaille : OFF")
+        self.bouton_multitaille.setFixedSize(250, 50)
+        self.bouton_multitaille.setStyleSheet(
+            "background-color: darkred; color: white; font-size: 16px;"
+        )
+        self.bouton_multitaille.clicked.connect(self.toggle_multitaille)
 
         # Layout
         layout = QVBoxLayout()
@@ -104,6 +118,7 @@ class InterfacePersonnalisation(QWidget):
 
         layout_boutons = QHBoxLayout()
         layout_boutons.addWidget(self.bouton_retour)
+        layout_boutons.addWidget(self.bouton_multitaille)
         layout_boutons.addWidget(self.bouton_enregistrer)
         layout.addLayout(layout_boutons)
 
@@ -119,24 +134,37 @@ class InterfacePersonnalisation(QWidget):
         return 15 if mag < -5 else self.kernel_slider.value() | 1
 
     def mettre_a_jour_image(self):
-        threshold_sigma = self.threshold_slider.value() / 10.0
+        if self.multitaille_active:
+            self.mettre_a_jour_image_multitaille()
+        else:
+            self.mettre_a_jour_image_simple()
+
+    def mettre_a_jour_image_simple(self):
+        THRESHOLD_SIGMA = self.threshold_slider.value() / 10.0
         
         # Calcul des statistiques de fond de ciel
         # moyenne : moyenne du fond
         # mediane : valeur du fond de ciel
         # std : écart-type du bruit
-        mean, median, std = sigma_clipped_stats(self.image_float, sigma=3.0)
+        moyenne, mediane, std = sigma_clipped_stats(self.image_float, sigma=3.0)
+        
+        # Initialisation de l’algorithme de détection d’étoile
+        daofind = DAOStarFinder(fwhm=self.FWHM_PSF, threshold=THRESHOLD_SIGMA * std)
 
-        daofind = DAOStarFinder(fwhm=self.FWHM_PSF, threshold=threshold_sigma * std)
-        sources = daofind(self.image_float - median)
+        # Détection des étoiles sur l’image après soustraction du fond (médiane)
+        # sources contient les positions et caractéristiques des étoiles détectées
+        sources = daofind(self.image_float - mediane)
 
         # Image finale
         image_finale = self.image_originale.astype(np.float32)
 
+        
+        # Vérification qu’au moins une étoile a été détectée
         if sources is not None:
             # Masque global
             masque_total = np.zeros_like(self.image_originale, dtype=np.float32)
             for star in sources:
+                # Coordonnées du centre de l’étoile détectée
                 x = int(star["xcentroid"])
                 y = int(star["ycentroid"])
                 kernel_size = self.noyau_magnitude(star["mag"])
@@ -153,6 +181,76 @@ class InterfacePersonnalisation(QWidget):
         self.image_traitée = np.clip(image_finale, 0, 255).astype(np.uint8)
         self.afficher_image(self.image_traitée)
 
+    def mettre_a_jour_image_multitaille(self):
+        THRESHOLD_SIGMA = self.threshold_slider.value() / 10.0
+
+        # Calcul des statistiques de fond de ciel
+        # moyenne : moyenne du fond
+        # mediane : valeur du fond de ciel
+        # std : écart-type du bruit
+        moyenne, mediane, std = sigma_clipped_stats(self.image_float, sigma=3.0)
+
+        # Initialisation de l’algorithme de détection d’étoile
+        daofind = DAOStarFinder(fwhm=self.FWHM_PSF, threshold=THRESHOLD_SIGMA * std)
+
+        # Détection des étoiles sur l’image après soustraction du fond (médiane)
+        # sources contient les positions et caractéristiques des étoiles détectées  
+        sources = daofind(self.image_float - mediane)
+
+        image_finale = self.image_originale.astype(np.float32)
+
+        # Vérification qu’au moins une étoile a été détectée
+        if sources is None:
+            self.image_traitée = self.image_originale
+            self.afficher_image(self.image_traitée)
+            return
+
+        # Masques par taille de noyau
+        kernel_sizes = [3, 15]
+        masques = {
+            k: np.zeros_like(self.image_originale, dtype=np.uint8)
+            for k in kernel_sizes
+            }
+
+        
+        for star in sources:
+            # Coordonnées du centre de l’étoile détectée
+            x = int(star["xcentroid"])
+            y = int(star["ycentroid"])
+            mag = star["mag"]
+
+            k = 15 if mag < -5 else 3
+            if k not in masques:
+                continue
+
+            # Dessin d’un carré blanc centré sur chaque étoile
+            cv.rectangle(masques[k],
+                         (x - self.ETOILES_RAYON, y - self.ETOILES_RAYON),
+                         (x + self.ETOILES_RAYON, y + self.ETOILES_RAYON),
+                         255, -1
+            )
+
+        for kernel_size, masque in masques.items():
+            # On vérifie si c'est pas nul sinon on passe au suivant
+            if np.count_nonzero(masque) == 0:
+                continue
+
+            
+            kernel = np.ones((kernel_size, kernel_size), np.uint8)
+            image_eroded = cv.erode(self.image_originale, kernel, iterations=1).astype(np.float32)
+
+            #On met en flou comme sur erosion.py 
+            masque_flou = cv.GaussianBlur(masque, (21, 21), 0) / 255.0
+
+            # On fusionne l'image eroder et la version flou (comme demander en phase 2)
+            image_finale = (
+                masque_flou * image_eroded +
+                (1 - masque_flou) * image_finale
+            )
+
+        self.image_traitée = np.clip(image_finale, 0, 255).astype(np.uint8)
+        self.afficher_image(self.image_traitée)
+
     def afficher_image(self, image):
         h, w = image.shape
         qimg = QImage(image.data, w, h, w, QImage.Format_Grayscale8)
@@ -164,13 +262,26 @@ class InterfacePersonnalisation(QWidget):
         self.label_image.setPixmap(pixmap)
 
     def enregistrer_et_comparer(self):
-        self.interface_comp = ComparateurApplication(
-            self.image_originale,
-            self.image_traitée,
-            self
-        )
+        self.interface_comp = ComparateurApplication(self.image_originale, self.image_traitée, self)
         self.interface_comp.showMaximized()
         self.hide()
+    
+    def toggle_multitaille(self):
+        self.multitaille_active = not self.multitaille_active
+
+        if self.multitaille_active:
+            self.bouton_multitaille.setText("Réduction multitaille : ON")
+            self.bouton_multitaille.setStyleSheet(
+                "background-color: darkgreen; color: white; font-size: 14px;"
+            )
+        else:
+            self.bouton_multitaille.setText("Réduction multitaille : OFF")
+            self.bouton_multitaille.setStyleSheet(
+                "background-color: darkred; color: white; font-size: 14px;"
+            )
+
+        self.mettre_a_jour_image()
+
 
 
 
