@@ -8,6 +8,32 @@ Cousin Bastien (TD1-TPB)
 Deldalle Pierre (TD1-TPB)
 Groué Sébastien (TD2-TPD)
 
+## Méthodes choisies
+
+- Interface Utilisateur : Développez une interface permettant de charger un fichier FITS et
+d’ajuster en temps réel la force de la réduction (taille du noyau et seuil du masque).
+
+- Comparateur Avant/Après : Créez un outil de visualisation qui permet de superposer
+rapidement l’image originale et l’image traitée (fonction "clignotement" + ajout de slider avec la bibliothéque QT) pour
+détecter les pertes de détails dans la nébuleuse.
+
+- Réduction Multitaille : Les grosses étoiles nécessitent une érosion plus forte que les petites.
+Proposez un algorithme qui adapte la taille du noyau d’érosion en fonction de la magnitude
+de l’étoile.
+
+## Difficultés rencontrées
+
+- Problème avec le dossier venv, qu’on essayait de push sur le github. 
+
+- Problème lors de l’érosion, ajouter la Réduction Multi-taille donnait des masques complétement noirs qui n'affichaient aucune étoiles. 
+
+- Problèmes de lenteur sur l’application utilisateur,  impossible de manipuler les curseurs à cause des calculs.
+
+## Résultat
+
+Une application fonctionnelle où l'utilisateur peut choisir l'image FITS qu'il souhaite modifier. Il y a donc une interface d'accueil où l'utilisateur peut récupérer son image FITS dans ses dossiers personnels. Il peut ensuite la modifier avec deux curseurs : la taille du noyau d'érosion et le seuil de détection des étoiles, il peut aussi décider d'afficher une réduction Multitaille si il le souhaite avec un bouton ON/OFF. Une fois ses modifications réalisées, il enregistre et peut comparer grâce à un bouton de clignotement et un curseur qui permet de voir précisément ce qui change.
+
+
 # Project Documentation
 
 ## Installation
