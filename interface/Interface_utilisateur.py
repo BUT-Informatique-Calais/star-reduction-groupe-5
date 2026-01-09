@@ -24,14 +24,16 @@ class InterfaceChoix(QWidget):
         super().__init__()
         self.setWindowTitle("Choisir une image FITS")
         self.resize(800, 600)
-        self.bouton_ouvrir.setMinimumSize(900, 600)
-        self.bouton_ouvrir.setStyleSheet("background-color: gray; color: white;")
 
         self.bouton_ouvrir = QPushButton("Ouvrir FITS")
         self.bouton_ouvrir.clicked.connect(self.ouvrir_fits)
+        self.bouton_ouvrir.setMinimumSize(200, 50)
+        self.bouton_ouvrir.setStyleSheet("background-color: gray; color: white; font-size: 18px;")
 
         layout = QVBoxLayout()
-        layout.addWidget(self.bouton_ouvrir)
+        layout.addStretch()
+        layout.addWidget(self.bouton_ouvrir, alignment=Qt.AlignCenter)
+        layout.addStretch()
         self.setLayout(layout)
 
     def ouvrir_fits(self):
@@ -41,6 +43,10 @@ class InterfaceChoix(QWidget):
 
         # Lecture de l'image chosie
         data = fits.getdata(path)
+        if data.ndim > 2:
+            data = np.mean(data, axis=0)
+
+        data = np.nan_to_num(data)
         image = ((data - np.min(data)) / (np.max(data) - np.min(data)) * 255).astype(np.uint8)
 
         # Ouvre l'interface de personnalisation
@@ -80,33 +86,49 @@ class InterfacePersonnalisation(QWidget):
 
         self.bouton_enregistrer = QPushButton("Enregistrer et Comparer")
         self.bouton_enregistrer.clicked.connect(self.enregistrer_et_comparer)
-        self.bouton_enregistrer.setStyleSheet("background-color: gray; color: black;")
+        self.bouton_enregistrer.setFixedSize(380, 50)
+        self.bouton_enregistrer.setStyleSheet("background-color: gray; color: white; font-size: 16px;")
 
+        self.bouton_retour = QPushButton("Retour")
+        self.bouton_retour.setFixedSize(120, 50)
+        self.bouton_retour.setStyleSheet("background-color: orange; color: white; font-size: 16px;")
+        self.bouton_retour.clicked.connect(self.retour_interface_choix)
+
+        # Layout
         layout = QVBoxLayout()
-        layout.addWidget(QLabel("Taille du noyau d’érosion :"))
+        layout.addWidget(QLabel("Taille du noyau d'érosion :"))
         layout.addWidget(self.kernel_slider)
-        layout.addWidget(QLabel("Seuil de détection des étoiles :"))
+        layout.addWidget(QLabel("Seuil de détection des étoiles : "))
         layout.addWidget(self.threshold_slider)
         layout.addWidget(self.label_image)
-        layout.addWidget(self.bouton_enregistrer)
-        self.setLayout(layout)
 
+        layout_boutons = QHBoxLayout()
+        layout_boutons.addWidget(self.bouton_retour)
+        layout_boutons.addWidget(self.bouton_enregistrer)
+        layout.addLayout(layout_boutons)
+
+        self.setLayout(layout)
         self.afficher_image(self.image_traitée)
 
+    def retour_interface_choix(self):
+        self.close()
+        self.interface_choix = InterfaceChoix()
+        self.interface_choix.showMaximized()
+
     def noyau_magnitude(self, mag):
-        return 15 if mag < -5 else self.kernel_slider.value() | 1 
+        return 15 if mag < -5 else self.kernel_slider.value() | 1
 
     def mettre_a_jour_image(self):
-        THRESHOLD_SIGMA = self.threshold_slider.value() / 10.0
-
+        threshold_sigma = self.threshold_slider.value() / 10.0
+        
         # Calcul des statistiques de fond de ciel
         # moyenne : moyenne du fond
         # mediane : valeur du fond de ciel
         # std : écart-type du bruit
-        moyenne, mediane, std = sigma_clipped_stats(self.image_float, sigma=3.0)
+        mean, median, std = sigma_clipped_stats(self.image_float, sigma=3.0)
 
-        daofind = DAOStarFinder(fwhm=self.FWHM_PSF, threshold=THRESHOLD_SIGMA * std)
-        sources = daofind(self.image_float - mediane)
+        daofind = DAOStarFinder(fwhm=self.FWHM_PSF, threshold=threshold_sigma * std)
+        sources = daofind(self.image_float - median)
 
         # Image finale
         image_finale = self.image_originale.astype(np.float32)
@@ -142,15 +164,23 @@ class InterfacePersonnalisation(QWidget):
         self.label_image.setPixmap(pixmap)
 
     def enregistrer_et_comparer(self):
-        self.interface_comp = ComparateurApplication(self.image_originale, self.image_traitée)
+        self.interface_comp = ComparateurApplication(
+            self.image_originale,
+            self.image_traitée,
+            self
+        )
         self.interface_comp.showMaximized()
-        self.close()
+        self.hide()
+
 
 
 # Interface 3 : Comparateur Avant / Après de la photo
 class ComparateurApplication(QWidget):
-    def __init__(self, image_originale, image_finale):
+    def __init__(self, image_originale, image_finale, interface_personnalisation):
         super().__init__()
+
+        self.interface_personnalisation = interface_personnalisation
+
         self.setWindowTitle("Comparateur Avant / Après")
         self.resize(1200, 900)
 
@@ -185,6 +215,11 @@ class ComparateurApplication(QWidget):
         self.label_apres = QLabel("Après")
         self.label_avant.setAlignment(Qt.AlignLeft)
         self.label_apres.setAlignment(Qt.AlignRight)
+        
+        self.bouton_retour = QPushButton("Retour")
+        self.bouton_retour.setFixedSize(120, 50)
+        self.bouton_retour.setStyleSheet("background-color: orange; color: white; font-size: 16px;")
+        self.bouton_retour.clicked.connect(self.retour_interface_personnalisation)
 
         layout_slider = QHBoxLayout()
         layout_slider.addWidget(self.label_avant)
@@ -192,6 +227,7 @@ class ComparateurApplication(QWidget):
         layout_slider.addWidget(self.label_apres)
 
         layout_boutons = QHBoxLayout()
+        layout_boutons.addWidget(self.bouton_retour)
         layout_boutons.addWidget(self.bouton_start)
         layout_boutons.addWidget(self.bouton_stop)
 
@@ -230,6 +266,11 @@ class ComparateurApplication(QWidget):
             Qt.KeepAspectRatio
         )
         self.label_image.setPixmap(pixmap)
+    
+    def retour_interface_personnalisation(self):
+        self.close()
+        self.interface_personnalisation.showMaximized()
+
 
 
 # Lancement de l'application
